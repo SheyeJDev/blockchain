@@ -279,14 +279,16 @@ pub struct PendingPaymentToken {
     pub apply_after_ledger: u32,
 }
 
-/// Platform fee taken from every resale and paid to `recipient` out of the
-/// seller's proceeds, alongside the organizer royalty (issue #103).
+/// Unified platform fee configuration for both primary sales and resales (issue #427).
+/// Paid to `recipient` from seller's proceeds on resales, and from buyer on primary sales.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlatformFee {
+    /// Share of each primary sale price, in basis points.
+    pub primary_bps: u32,
     /// Share of each resale price, in basis points.
-    pub bps: u32,
-    /// Address that receives the fee.
+    pub resale_bps: u32,
+    /// Address that receives both fees.
     pub recipient: Address,
 }
 
@@ -406,9 +408,19 @@ pub enum DataKey {
     WalletPurchaseCount(u64, Address),
     /// Allowlist member for an event.
     AllowlistMember(u64, Address),
-    /// Platform fee taken from each primary sale, in basis points (issue #104).
-    /// Absent means no fee.
+    /// DEPRECATED: Old primary sale fee storage (issue #104). Migrated to PlatformFee.
+    /// Kept for migration path. Use PlatformFee instead.
     PlatformFeeBps,
+    /// Unified platform fee configuration for both primary and resales (issue #427).
+    /// Contains primary_bps, resale_bps, and recipient. Absent means no fees.
+    PlatformFee,
+    /// Highest royalty_bps across all events, cached so set_platform_fee can
+    /// validate that the platform fee plus the highest royalty never exceeds
+    /// 100% (issue #103). Zero when no events have been created.
+    MaxRoyaltyBps,
+    /// Nominated admin awaiting acceptance via accept_admin (issue #100).
+    /// Absent when no admin transfer is pending.
+    PendingAdmin,
     /// Funds the contract holds for resale bids and offers, across all tickets
     /// (issues #105, #106). Blocks a payment token change while non-zero.
     OutstandingResaleFunds,
@@ -429,15 +441,6 @@ pub enum DataKey {
     /// ledger seconds (issue #72). Absent means the ticket is valid whenever
     /// the event allows check-in.
     TicketValidity(u64),
-    /// Platform fee configuration including basis points and recipient address (issue #103).
-    /// Stored as a struct instead of separate keys.
-    PlatformFee,
-    /// Maximum royalty basis points across all events (issue #103).
-    /// Used to validate platform fee changes.
-    MaxRoyaltyBps,
-    /// Pending admin transfer nominee (issue #100).
-    /// The address nominated by the current admin to become the new admin.
-    PendingAdmin,
     /// Marks a ticket as acquired through on-chain primary sale (issue #439).
     /// Only tickets with this marker set can be refunded on-chain via
     /// `refund_primary`. Absent for tickets issued off-chain or as comps.

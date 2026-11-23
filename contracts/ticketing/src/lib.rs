@@ -28,14 +28,6 @@ pub use events::{
 pub use types::{
     Auction, Category, DataKey, Event, EventParams, GiftClaim, Offer, PendingPaymentToken,
     PlatformFee, StoredTicket, Ticket, TicketRecipient, TicketStatus,
-    ContractInitialized, EventCancelled, EventCreated, ListingCancelled, OrganizerApproved,
-    OrganizerRevoked, PaymentTokenChanged, PaymentTokenProposed, PlatformFeeUpdated,
-    PrimarySale, PurchaseThrottleUpdated, TicketCheckedIn, TicketIssued, TicketListed,
-    TicketResold, TicketTransferred,
-};
-pub use types::{
-    Auction, Category, DataKey, Event, EventParams, GiftClaim, Offer, PendingPaymentToken,
-    StoredTicket, Ticket, TicketRecipient, TicketStatus,
 };
 
 use soroban_sdk::{contract, contractimpl, token, Address, Bytes, BytesN, Env, Map, String, Vec};
@@ -289,8 +281,7 @@ impl TicketingContract {
         }
         // Issue #103: the royalty and the platform fee together cannot take more
         // than the whole resale price.
-        if params.royalty_bps + Self::platform_fee_bps(env.clone()) > BPS_DENOMINATOR {
-        if params.royalty_bps + Self::platform_fee_bps_internal(&env) > BPS_DENOMINATOR {
+        if params.royalty_bps + Self::get_platform_fee_bps(&env) > BPS_DENOMINATOR {
             return Err(Error::InvalidRoyalty);
         }
         // Issue #124: a multiplier below face value (10_000 bps) makes every
@@ -1095,37 +1086,99 @@ impl TicketingContract {
         Ok(())
     }
 
-    /// Sets the platform fee taken from every primary sale, in basis points of
-    /// the sale price (issue #104). `0` turns the fee off. The fee is paid to
-    /// the admin when a sale settles, and the organizer receives the rest.
+    /// Sets the unified platform fee for both primary sales and resales (issue #427).
+    /// The fee is taken in basis points from both primary and resale transactions.
+    /// For primary sales, the fee is paid by the buyer to `recipient`.
+    /// For resales, the fee is paid from seller's proceeds to `recipient`.
     ///
     /// # Errors
     ///
-    /// Returns `Error::InvalidPlatformFee` when `fee_bps` is above 10_000.
+    /// Returns `Error::InvalidPlatformFee` when either fee exceeds 10_000 bps (100%).
+    pub fn set_platform_fee(
+        env: Env,
+        admin: Address,
+        primary_bps: u32,
+        resale_bps: u32,
+        recipient: Address,
+    ) -> Result<(), Error> {
+        Self::extend_instance_ttl(&env);
+        Self::require_admin(&env, &admin)?;
+        if primary_bps > BPS_DENOMINATOR || resale_bps > BPS_DENOMINATOR {
+            return Err(Error::InvalidPlatformFee);
+        }
+        // Store the unified fee configuration
+        env.storage().instance().set(
+            &DataKey::PlatformFee,
+            &PlatformFee {
+                primary_bps,
+                resale_bps,
+                recipient: recipient.clone(),
+            },
+        );
+        // Migrate: remove old PlatformFeeBps key if it exists
+        if env.storage().instance().has(&DataKey::PlatformFeeBps) {
+            env.storage().instance().remove(&DataKey::PlatformFeeBps);
+        }
+        // Publish event for primary fee (maintaining backwards compatibility)
+        PlatformFeeUpdated {
+            admin: admin.clone(),
+            fee_bps: primary_bps,
+            recipient: recipient.clone(),
+        }
+        .publish(&env);
+        // Publish event for resale fee
+        PlatformFeeUpdated {
+            admin,
+            fee_bps: resale_bps,
+            recipient,
+        }
+        .publish(&env);
+        Ok(())
+    }
+
+    /// DEPRECATED: Use `set_platform_fee` instead. This is kept for backwards compatibility.
+    /// Sets only the primary sale fee, leaving resale fee unchanged.
     pub fn set_platform_fee_bps(env: Env, admin: Address, fee_bps: u32) -> Result<(), Error> {
         Self::extend_instance_ttl(&env);
         Self::require_admin(&env, &admin)?;
         if fee_bps > BPS_DENOMINATOR {
             return Err(Error::InvalidPlatformFee);
         }
-        env.storage()
-            .instance()
-            .set(&DataKey::PlatformFeeBps, &fee_bps);
+        
+        // Get existing config or create new one
+        let existing = Self::platform_fee_config(&env);
+        let resale_bps = existing.as_ref().map_or(0, |f| f.resale_bps);
+        let recipient = existing.map_or(admin.clone(), |f| f.recipient);
+        
+        // Store unified config
+        env.storage().instance().set(
+            &DataKey::PlatformFee,
+            &PlatformFee {
+                primary_bps: fee_bps,
+                resale_bps,
+                recipient: recipient.clone(),
+            },
+        );
+        
+        // Remove old key if present
+        if env.storage().instance().has(&DataKey::PlatformFeeBps) {
+            env.storage().instance().remove(&DataKey::PlatformFeeBps);
+        }
+        
         PlatformFeeUpdated {
             admin: admin.clone(),
             fee_bps,
             recipient: admin,
         }
         .publish(&env);
-        let recipient = admin.clone();
-        PlatformFeeUpdated { admin, fee_bps, recipient }.publish(&env);
         Ok(())
     }
 
-    /// Platform fee in basis points taken from each primary sale (issue #104).
+    /// DEPRECATED: Returns only the primary sale fee from the unified config.
+    /// Use `platform_fee()` to get the full configuration.
     /// Zero when no fee has been set.
     pub fn platform_fee_bps(env: Env) -> u32 {
-        Self::get_platform_fee_bps(&env)
+        Self::platform_fee_bps_internal(&env)
     }
 
     /// Direct, non-marketplace transfer (gift, family member, etc). Publishes
@@ -2100,18 +2153,8 @@ impl TicketingContract {
         // published event carries the price the buyer actually paid.
         let price = ticket.resale_price;
         let fee_config = Self::platform_fee_config(&env);
-        let fee_bps = Self::platform_fee_bps(&env);
-        let platform_fee = if let Some(ref fee) = fee_config {
-            Self::calculate_fee(price, fee.bps)?
-        } else {
-            0
-        };
-        let (royalty, seller_net) = Self::split_resale_price(&event, price)?;
-        let seller_amount = seller_net
-            .checked_sub(platform_fee)
-            .ok_or(Error::MathOverflow)?;
-        let fee_bps = Self::platform_fee_bps_internal(&env);
-        let (royalty, platform_fee, seller_amount) = Self::resale_split(&event, ticket.resale_price, fee_bps)?;
+        let fee_bps = Self::get_platform_fee_bps(&env);
+        let (royalty, platform_fee, seller_amount) = Self::resale_split(&event, price, fee_bps)?;
         let seller = ticket.owner.clone();
         Self::move_owner_balance(&env, ticket_id, &seller, &buyer);
         ticket.owner = buyer.clone();
@@ -2804,14 +2847,12 @@ impl TicketingContract {
             &buyer,
             &offer.amount,
         );
-        OfferCancelled { ticket_id, buyer }.publish(&env);
-        // OfferCancelled event not yet implemented
-        // OfferCancelled {
-        //     ticket_id,
-        //     buyer,
-        //     amount: offer.amount,
-        // }
-        // .publish(&env);
+        OfferCancelled {
+            ticket_id,
+            buyer,
+            amount: offer.amount,
+        }
+        .publish(&env);
         Ok(())
     }
 
@@ -3328,13 +3369,9 @@ impl TicketingContract {
             .set(&DataKey::OutstandingResaleFunds, &total);
     }
 
-    /// Platform fee owed on a primary sale of `price`, rounded down (issue #104).
+    /// Platform fee owed on a primary sale of `price`, rounded down (issue #104, #427).
     fn platform_fee_on(env: &Env, price: i128) -> Result<i128, Error> {
-        let fee_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::PlatformFeeBps)
-            .unwrap_or(0);
+        let fee_bps = Self::platform_fee_bps_internal(env);
         if fee_bps == 0 {
             return Ok(0);
         }
@@ -3742,8 +3779,11 @@ impl TicketingContract {
     ///
     /// # Errors
     ///
-    // set_platform_fee is a newer feature not yet fully implemented
+    /// Returns `Error::InvalidPlatformFee` when `fee_bps` exceeds 10_000, or
+    /// when `fee_bps` plus the highest event royalty exceeds 10_000.
+    // Note: set_platform_fee is not yet fully implemented
     // For now, only set_platform_fee_bps (line 1081) is available
+    // Uncomment when max_royalty_bps tracking is ready
     /*
     pub fn set_platform_fee(
         env: Env,
@@ -3771,6 +3811,7 @@ impl TicketingContract {
         .publish(&env);
         Ok(())
     }
+    */
 
     /// The configured platform fee, or `None` when none has been set.
     pub fn platform_fee(env: Env) -> Option<PlatformFee> {
@@ -3778,17 +3819,33 @@ impl TicketingContract {
     }
 
     fn platform_fee_config(env: &Env) -> Option<PlatformFee> {
-        env.storage().instance().get(&DataKey::PlatformFee)
+        // Check new unified config first
+        if let Some(config) = env.storage().instance().get::<_, PlatformFee>(&DataKey::PlatformFee) {
+            return Some(config);
+        }
+        
+        // Migration: check if old PlatformFeeBps exists
+        if let Some(old_bps) = env.storage().instance().get::<_, u32>(&DataKey::PlatformFeeBps) {
+            // Get admin as default recipient
+            if let Some(admin) = env.storage().instance().get::<_, Address>(&DataKey::Admin) {
+                // Return migrated config (don't auto-migrate storage, let setter do that)
+                return Some(PlatformFee {
+                    primary_bps: old_bps,
+                    resale_bps: 0,
+                    recipient: admin,
+                });
+            }
+        }
+        
+        None
     }
-    */
 
     fn get_platform_fee_bps(env: &Env) -> u32 {
-        Self::platform_fee_config(env).map_or(0, |fee| fee.bps)
+        Self::platform_fee_config(env).map_or(0, |fee| fee.resale_bps)
+    }
+    
     fn platform_fee_bps_internal(env: &Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&DataKey::PlatformFeeBps)
-            .unwrap_or(0)
+        Self::platform_fee_config(env).map_or(0, |fee| fee.primary_bps)
     }
 
     // max_royalty_bps tracking not yet implemented

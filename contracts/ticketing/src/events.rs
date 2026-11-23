@@ -214,11 +214,6 @@ pub struct BidPlaced {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Emitted when an auction settles and ownership transfers to the winner (issue #105).
-pub struct AuctionSettled {
-    #[topic]
-    pub ticket_id: u64,
-    pub buyer: Address,
-    pub amount: i128,
 /// Emitted by `settle_auction` after ownership and payment are finalized (issue #105).
 pub struct AuctionSettled {
     #[topic]
@@ -242,11 +237,6 @@ pub struct OfferMade {
 #[contractevent]
 #[derive(Clone, Debug, Eq, PartialEq)]
 /// Emitted when a seller accepts an offer (issue #106).
-pub struct OfferAccepted {
-    #[topic]
-    pub ticket_id: u64,
-    pub buyer: Address,
-    pub amount: i128,
 /// Emitted by `accept_offer` after ownership and payment are finalized (issue #106).
 pub struct OfferAccepted {
     #[topic]

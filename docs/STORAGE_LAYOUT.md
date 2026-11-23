@@ -18,18 +18,21 @@ Instance keys share a single storage entry and the contract instance's
 TTL. One `instance().extend_ttl()` call (made at the top of almost every
 entry point via `extend_instance_ttl`) extends all of them together.
 
-| Key | Value type | Set by | Notes |
-|---|---|---|---|
-| `Admin` | `Address` | `initialize` | Contract admin; also marks the contract as initialized |
-| `PaymentToken` | `Address` | `initialize`, `apply_payment_token` | Contract-wide SEP-41 payment token |
-| `TokenDecimals` | `u32` | `initialize`, `apply_payment_token` | Cached decimals of the active payment token (issue #233) |
-| `PendingPaymentToken` | `PendingPaymentToken` | `propose_payment_token` | Timelocked token change; removed on apply |
-| `MinPurchaseSpacing` | `u32` | `set_purchase_throttle` | Minimum ledger spacing between a buyer's primary purchases; 0 disables |
-| `NextTicketId` | `u64` | `initialize`, `mint` | Monotonic ticket-id allocator |
-| `OutstandingEscrow` | `i128` | `purchase_primary`, `release_escrow`, `revoke_with_refund`, `refund_primary` | Total escrowed primary-sale proceeds across all events (issue #317) |
-| `PlatformFeeBps` | `u32` | `set_platform_fee_bps` | Platform fee in basis points (issue #104); absent means no fee |
-| `OutstandingResaleFunds` | `i128` | `place_bid`, `settle_auction`, `make_offer`, `accept_offer`, `cancel_offer` | Total resale bids/offers held (issues #105, #106) |
-| `Paused` | `bool` | `pause`, `unpause` | Contract-wide kill switch; absent means unpaused |
+| Key                      | Value type            | Set by                                                                       | Notes                                                                                                                                       |
+| ------------------------ | --------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Admin`                  | `Address`             | `initialize`                                                                 | Contract admin; also marks the contract as initialized                                                                                      |
+| `PaymentToken`           | `Address`             | `initialize`, `apply_payment_token`                                          | Contract-wide SEP-41 payment token                                                                                                          |
+| `TokenDecimals`          | `u32`                 | `initialize`, `apply_payment_token`                                          | Cached decimals of the active payment token (issue #233)                                                                                    |
+| `PendingPaymentToken`    | `PendingPaymentToken` | `propose_payment_token`                                                      | Timelocked token change; removed on apply                                                                                                   |
+| `MinPurchaseSpacing`     | `u32`                 | `set_purchase_throttle`                                                      | Minimum ledger spacing between a buyer's primary purchases; 0 disables                                                                      |
+| `NextTicketId`           | `u64`                 | `initialize`, `mint`                                                         | Monotonic ticket-id allocator                                                                                                               |
+| `OutstandingEscrow`      | `i128`                | `purchase_primary`, `release_escrow`, `revoke_with_refund`, `refund_primary` | Total escrowed primary-sale proceeds across all events (issue #317)                                                                         |
+| `PlatformFeeBps`         | `u32`                 | `set_platform_fee_bps` (deprecated)                                          | DEPRECATED: Old primary sale fee storage (issue #104). Migrated to unified `PlatformFee`. Kept for backwards compatibility during migration |
+| `PlatformFee`            | `PlatformFee`         | `set_platform_fee`, `set_platform_fee_bps`                                   | Unified platform fee configuration with `primary_bps`, `resale_bps`, and `recipient` (issue #427); absent means no fees                     |
+| `MaxRoyaltyBps`          | `u32`                 | `record_royalty_bps` during event creation                                   | Highest royalty_bps across all events, used to validate that platform fee + highest royalty ≤ 100% (issue #103); zero when no events exist  |
+| `PendingAdmin`           | `Address`             | `propose_admin`                                                              | Nominated admin awaiting acceptance via accept_admin (issue #100); removed when accepted                                                    |
+| `OutstandingResaleFunds` | `i128`                | `place_bid`, `settle_auction`, `make_offer`, `accept_offer`, `cancel_offer`  | Total resale bids/offers held (issues #105, #106)                                                                                           |
+| `Paused`                 | `bool`                | `pause`, `unpause`                                                           | Contract-wide kill switch; absent means unpaused                                                                                            |
 
 ## Persistent storage
 
@@ -40,37 +43,37 @@ An entry that is never touched again after its last extension survives
 
 ### Event records
 
-| Key | Value type | Extended on | Removed on |
-|---|---|---|---|
-| `Event(id)` | `Event` | `create_event`, `create_event_with_options`, and every write via `save_event` | never (cancelled events stay for audit) |
-| `TicketsIssued(id)` | `u64` | `create_event*`, every mint via `increment_tickets_issued` | never |
-| `TierPrice(id, tier)` | `i128` | `set_tier_price` | never (0 marks a free tier) |
-| `TierIssued(id, tier)` | `u64` | every mint that hits the tier | never |
-| `TierCapacity(id, tier)` | `u64` | `set_tier_capacity` | removed when capacity is cleared |
-| `TierZones(id, tier)` | `Vec<String>` | `set_tier_zones` | removed when the zone list is emptied |
-| `SaleWindow(id)` | `(Option<u64>, Option<u64>)` | `set_event_sale_window` | removed when both bounds are cleared |
-| `TierPerks(id, tier)` | `Vec<String>` | `set_tier_perks` | removed when the perk list is emptied |
-| `EventMetadata(id)` | `Map<String, String>` | `set_event_metadata`, `remove_event_metadata` | removed when the last entry is removed |
-| `AllowlistMember(id, addr)` | `bool` (presence) | `add_to_allowlist` | `remove_from_allowlist` |
-| `WalletPurchaseCount(id, addr)` | `u32` | `purchase_primary`, `refund_primary` | never |
-| `OrganizerEvents(org)` | `u32` | `create_event*` | never |
-| `OrganizerEventAt(org, idx)` | `u64` | `create_event*` | never |
+| Key                             | Value type                   | Extended on                                                                   | Removed on                              |
+| ------------------------------- | ---------------------------- | ----------------------------------------------------------------------------- | --------------------------------------- |
+| `Event(id)`                     | `Event`                      | `create_event`, `create_event_with_options`, and every write via `save_event` | never (cancelled events stay for audit) |
+| `TicketsIssued(id)`             | `u64`                        | `create_event*`, every mint via `increment_tickets_issued`                    | never                                   |
+| `TierPrice(id, tier)`           | `i128`                       | `set_tier_price`                                                              | never (0 marks a free tier)             |
+| `TierIssued(id, tier)`          | `u64`                        | every mint that hits the tier                                                 | never                                   |
+| `TierCapacity(id, tier)`        | `u64`                        | `set_tier_capacity`                                                           | removed when capacity is cleared        |
+| `TierZones(id, tier)`           | `Vec<String>`                | `set_tier_zones`                                                              | removed when the zone list is emptied   |
+| `SaleWindow(id)`                | `(Option<u64>, Option<u64>)` | `set_event_sale_window`                                                       | removed when both bounds are cleared    |
+| `TierPerks(id, tier)`           | `Vec<String>`                | `set_tier_perks`                                                              | removed when the perk list is emptied   |
+| `EventMetadata(id)`             | `Map<String, String>`        | `set_event_metadata`, `remove_event_metadata`                                 | removed when the last entry is removed  |
+| `AllowlistMember(id, addr)`     | `bool` (presence)            | `add_to_allowlist`                                                            | `remove_from_allowlist`                 |
+| `WalletPurchaseCount(id, addr)` | `u32`                        | `purchase_primary`, `refund_primary`                                          | never                                   |
+| `OrganizerEvents(org)`          | `u32`                        | `create_event*`                                                               | never                                   |
+| `OrganizerEventAt(org, idx)`    | `u64`                        | `create_event*`                                                               | never                                   |
 
 ### Ticket records
 
-| Key | Value type | Extended on | Removed on |
-|---|---|---|---|
-| `Ticket(id)` | `StoredTicket` (packed) | every write via `save_ticket` | `burn_used_ticket` |
-| `TicketMetadataUri(id)` | `String` | `issue_ticket_with_metadata`, `extend_ticket_ttl` | `burn_used_ticket` |
-| `ReentryCount(id)` | `u32` | `pass_out` | never |
-| `MaxUses(id)` | `u32` | `set_ticket_max_uses` | `burn_used_ticket` |
-| `UsedCount(id)` | `u32` | `consume_use` | `burn_used_ticket` |
-| `TicketValidity(id)` | `(Option<u64>, Option<u64>)` | `set_ticket_validity` | removed when both bounds are cleared, `burn_used_ticket` |
-| `OwnerHistory(id)` | `Vec<Address>` | every ownership change via `record_previous_owner` | never |
-| `Auction(id)` | `Auction` | `start_auction`, `place_bid`, `extend_ticket_ttl` | `settle_auction`, `cancel_resale` |
-| `Offer(id, buyer)` | `Offer` | `make_offer` | `accept_offer`, `cancel_offer` |
-| `TicketApproval(id)` | `Address` | `approve`, `extend_ticket_ttl` | any owner change, burn, `revoke_approval` |
-| `GiftClaim(id)` | `GiftClaim` | `create_gift_claim` | claim, transfer, check-in, revoke, list |
+| Key                     | Value type                   | Extended on                                        | Removed on                                               |
+| ----------------------- | ---------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| `Ticket(id)`            | `StoredTicket` (packed)      | every write via `save_ticket`                      | `burn_used_ticket`                                       |
+| `TicketMetadataUri(id)` | `String`                     | `issue_ticket_with_metadata`, `extend_ticket_ttl`  | `burn_used_ticket`                                       |
+| `ReentryCount(id)`      | `u32`                        | `pass_out`                                         | never                                                    |
+| `MaxUses(id)`           | `u32`                        | `set_ticket_max_uses`                              | `burn_used_ticket`                                       |
+| `UsedCount(id)`         | `u32`                        | `consume_use`                                      | `burn_used_ticket`                                       |
+| `TicketValidity(id)`    | `(Option<u64>, Option<u64>)` | `set_ticket_validity`                              | removed when both bounds are cleared, `burn_used_ticket` |
+| `OwnerHistory(id)`      | `Vec<Address>`               | every ownership change via `record_previous_owner` | never                                                    |
+| `Auction(id)`           | `Auction`                    | `start_auction`, `place_bid`, `extend_ticket_ttl`  | `settle_auction`, `cancel_resale`                        |
+| `Offer(id, buyer)`      | `Offer`                      | `make_offer`                                       | `accept_offer`, `cancel_offer`                           |
+| `TicketApproval(id)`    | `Address`                    | `approve`, `extend_ticket_ttl`                     | any owner change, burn, `revoke_approval`                |
+| `GiftClaim(id)`         | `GiftClaim`                  | `create_gift_claim`                                | claim, transfer, check-in, revoke, list                  |
 
 ### Owner index (issue #111)
 
@@ -79,20 +82,20 @@ These three keys form a swap-remove index over one owner's tickets, so
 The naming convention for index keys is documented in
 [`types.rs`](../contracts/ticketing/src/types.rs) and summarised below.
 
-| Key | Value type | Extended on | Removed on |
-|---|---|---|---|
-| `OwnerBalance(addr)` | `u64` | every mint and ownership change | never (lapsing reads as 0) |
-| `OwnerTicketCount(addr)` | `u32` | every mint and ownership change | never |
-| `OwnerTicketAt(addr, idx)` | `u64` | every mint and ownership change | on the ticket's last index slot during removal |
-| `TicketOwnerPos(id)` | `u32` | every mint and ownership change | on removal from the owner's index |
+| Key                        | Value type | Extended on                     | Removed on                                     |
+| -------------------------- | ---------- | ------------------------------- | ---------------------------------------------- |
+| `OwnerBalance(addr)`       | `u64`      | every mint and ownership change | never (lapsing reads as 0)                     |
+| `OwnerTicketCount(addr)`   | `u32`      | every mint and ownership change | never                                          |
+| `OwnerTicketAt(addr, idx)` | `u64`      | every mint and ownership change | on the ticket's last index slot during removal |
+| `TicketOwnerPos(id)`       | `u32`      | every mint and ownership change | on removal from the owner's index              |
 
 ### Throttle and check-in
 
-| Key | Value type | Extended on | Removed on |
-|---|---|---|---|
-| `LastPurchaseLedger(buyer)` | `u64` | `record_purchase` | never (expires with buyer inactivity) |
-| `CheckInSigner(id, signer)` | `bool` (presence) | `add_checkin_signer` | `remove_checkin_signer` |
-| `ApprovedOrganizer(addr)` | `bool` (presence) | `approve_organizer` | `revoke_organizer` |
+| Key                         | Value type        | Extended on          | Removed on                            |
+| --------------------------- | ----------------- | -------------------- | ------------------------------------- |
+| `LastPurchaseLedger(buyer)` | `u64`             | `record_purchase`    | never (expires with buyer inactivity) |
+| `CheckInSigner(id, signer)` | `bool` (presence) | `add_checkin_signer` | `remove_checkin_signer`               |
+| `ApprovedOrganizer(addr)`   | `bool` (presence) | `approve_organizer`  | `revoke_organizer`                    |
 
 ## Index naming convention (issue #52)
 
@@ -129,7 +132,10 @@ Instance storage (one entry, shared TTL)
 ├── MinPurchaseSpacing             → u32
 ├── NextTicketId                   → u64
 ├── OutstandingEscrow              → i128
-├── PlatformFeeBps                 → u32
+├── PlatformFeeBps                 → u32 (DEPRECATED, migrated to PlatformFee)
+├── PlatformFee                    → PlatformFee (unified: primary_bps, resale_bps, recipient)
+├── MaxRoyaltyBps                  → u32
+├── PendingAdmin                   → Address
 ├── OutstandingResaleFunds         → i128
 └── Paused                         → bool
 

@@ -164,15 +164,15 @@ Emitted when a buyer cancels their offer (issue #106).
 
 ## Admin events
 
-| Event                     | Emitted by              | Fields                                                            |
-| ------------------------- | ----------------------- | ----------------------------------------------------------------- |
-| `ContractInitialized`     | `initialize`            | `admin` (topic), `payment_token`                                  |
-| `PurchaseThrottleUpdated` | `set_purchase_throttle` | `admin` (topic), `min_ledger_spacing`                             |
-| `OrganizerApproved`       | `approve_organizer`     | `admin` (topic), `organizer`                                      |
-| `OrganizerRevoked`        | `revoke_organizer`      | `admin` (topic), `organizer`                                      |
-| `PaymentTokenProposed`    | `propose_payment_token` | `admin` (topic), `new_token`, `apply_after_ledger`                |
-| `PaymentTokenChanged`     | `apply_payment_token`   | `admin` (topic), `old_token`, `new_token`                         |
-| `ContractUpgraded`        | `upgrade`               | `admin` (topic), `new_wasm_hash` (see [UPGRADES.md](UPGRADES.md)) |
-| `AdminProposed`           | `propose_admin`         | `admin` (topic), `new_admin`                                      |
-| `AdminTransferred`        | `accept_admin`          | `old_admin` (topic), `new_admin`                                  |
-| `PlatformFeeUpdated`      | `set_platform_fee`      | `admin` (topic), `fee_bps`, `recipient`                           |
+| Event                     | Emitted by                                 | Fields                                                            |
+| ------------------------- | ------------------------------------------ | ----------------------------------------------------------------- |
+| `ContractInitialized`     | `initialize`                               | `admin` (topic), `payment_token`                                  |
+| `PurchaseThrottleUpdated` | `set_purchase_throttle`                    | `admin` (topic), `min_ledger_spacing`                             |
+| `OrganizerApproved`       | `approve_organizer`                        | `admin` (topic), `organizer`                                      |
+| `OrganizerRevoked`        | `revoke_organizer`                         | `admin` (topic), `organizer`                                      |
+| `PaymentTokenProposed`    | `propose_payment_token`                    | `admin` (topic), `new_token`, `apply_after_ledger`                |
+| `PaymentTokenChanged`     | `apply_payment_token`                      | `admin` (topic), `old_token`, `new_token`                         |
+| `ContractUpgraded`        | `upgrade`                                  | `admin` (topic), `new_wasm_hash` (see [UPGRADES.md](UPGRADES.md)) |
+| `AdminProposed`           | `propose_admin`                            | `admin` (topic), `new_admin`                                      |
+| `AdminTransferred`        | `accept_admin`                             | `old_admin` (topic), `new_admin`                                  |
+| `PlatformFeeUpdated`      | `set_platform_fee_bps`, `set_platform_fee` | `admin` (topic), `fee_bps`, `recipient`                           |

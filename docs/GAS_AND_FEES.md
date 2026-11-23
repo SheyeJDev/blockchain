@@ -1,9 +1,21 @@
 # Fees
 
 Every write to this contract is a regular Soroban transaction and
-pays the network's standard resource fee — there is no separate
-"platform fee" charged by the contract itself. The only value the
-contract ever moves beyond the caller's own transaction fee is the
+pays the network's standard resource fee. The contract can optionally
+charge a "platform fee" on both primary sales and resales (issue #427).
+
+For primary sales, the platform fee (if configured) is paid by the buyer
+directly to the designated recipient, separate from the organizer's proceeds.
+
+For resales, the platform fee (if configured) is deducted from the seller's
+proceeds and paid to the designated recipient, alongside the organizer's
+royalty.
+
+The platform fee is configured via `set_platform_fee(admin, primary_bps,
+resale_bps, recipient)` and stored as a unified `PlatformFee` struct
+containing both fee rates and the recipient address.
+
+Beyond platform fees, the only value the contract moves is the
 `payment_token` amounts in `purchase_primary` and `buy_resale`
 (primary sale proceeds and resale royalty/seller proceeds).
 
